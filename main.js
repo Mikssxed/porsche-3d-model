@@ -1,191 +1,71 @@
-import * as dat from "https://cdn.skypack.dev/dat.gui";
-import gsap from "https://cdn.skypack.dev/gsap";
-import * as THREE from "https://unpkg.com/three@0.126.1/build/three.module.js";
-import { OrbitControls } from "https://unpkg.com/three@0.126.1/examples/jsm/controls/OrbitControls.js";
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
-const gui = new dat.GUI();
-const world = {
-  plane: {
-    width: 400,
-    height: 400,
-    widthSegments: 50,
-    heightSegments: 50,
-  },
-};
-gui.add(world.plane, "width", 1, 500).onChange(generatePlane);
-
-gui.add(world.plane, "height", 1, 500).onChange(generatePlane);
-gui.add(world.plane, "widthSegments", 1, 100).onChange(generatePlane);
-gui.add(world.plane, "heightSegments", 1, 100).onChange(generatePlane);
-
-function generatePlane() {
-  planeMesh.geometry.dispose();
-  planeMesh.geometry = new THREE.PlaneGeometry(
-    world.plane.width,
-    world.plane.height,
-    world.plane.widthSegments,
-    world.plane.heightSegments
-  );
-
-  // vertice position randomization
-  const { array } = planeMesh.geometry.attributes.position;
-  const randomValues = [];
-  for (let i = 0; i < array.length; i++) {
-    if (i % 3 === 0) {
-      const x = array[i];
-      const y = array[i + 1];
-      const z = array[i + 2];
-
-      array[i] = x + (Math.random() - 0.5) * 3;
-      array[i + 1] = y + (Math.random() - 0.5) * 3;
-      array[i + 2] = z + (Math.random() - 0.5) * 3;
-    }
-
-    randomValues.push(Math.random() * Math.PI * 2);
-  }
-
-  planeMesh.geometry.attributes.position.randomValues = randomValues;
-  planeMesh.geometry.attributes.position.originalPosition =
-    planeMesh.geometry.attributes.position.array;
-
-  const colors = [];
-  for (let i = 0; i < planeMesh.geometry.attributes.position.count; i++) {
-    colors.push(0, 0.19, 0.4);
-  }
-
-  planeMesh.geometry.setAttribute(
-    "color",
-    new THREE.BufferAttribute(new Float32Array(colors), 3)
-  );
-}
-
-const raycaster = new THREE.Raycaster();
-const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(
-  75,
-  innerWidth / innerHeight,
-  0.1,
-  1000
-);
-const renderer = new THREE.WebGLRenderer();
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 renderer.setSize(innerWidth, innerHeight);
+renderer.setClearColor(0x000000);
 renderer.setPixelRatio(devicePixelRatio);
+
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
 document.body.appendChild(renderer.domElement);
 
-new OrbitControls(camera, renderer.domElement);
-camera.position.z = 50;
+const scene = new THREE.Scene();
 
-const planeGeometry = new THREE.PlaneGeometry(
-  world.plane.width,
-  world.plane.height,
-  world.plane.widthSegments,
-  world.plane.heightSegments
+const camera = new THREE.PerspectiveCamera(
+  45,
+  innerWidth / innerHeight,
+  1,
+  1000
 );
-const planeMaterial = new THREE.MeshPhongMaterial({
+camera.position.set(4, 5, 1);
+camera.lookAt(0, 0, 0);
+
+const groundGeometry = new THREE.PlaneGeometry(20, 20, 32, 32);
+groundGeometry.rotateX(-Math.PI / 2);
+const groundMaterial = new THREE.MeshStandardMaterial({
+  color: 0x555555,
   side: THREE.DoubleSide,
-  flatShading: THREE.FlatShading,
-  vertexColors: true,
 });
-const planeMesh = new THREE.Mesh(planeGeometry, planeMaterial);
-scene.add(planeMesh);
-generatePlane();
 
-const light = new THREE.DirectionalLight(0xffffff, 1);
-light.position.set(0, -1, 1);
-scene.add(light);
+const groundMesh = new THREE.Mesh(groundGeometry, groundMaterial);
+// groundMesh.castShadow = false;
+// groundMesh.receiveShadow = true;
+scene.add(groundMesh);
 
-const backLight = new THREE.DirectionalLight(0xffffff, 1);
-backLight.position.set(0, 0, -1);
-scene.add(backLight);
+const spotLight = new THREE.SpotLight(0xffffff, 4000, 100);
+spotLight.position.set(2, 25, 0);
+spotLight.castShadow = true;
+spotLight.shadow.bias = -0.0001;
+scene.add(spotLight);
 
-const mouse = {
-  x: undefined,
-  y: undefined,
-};
+const loader = new GLTFLoader().setPath("/porsche/");
+loader.load("scene.gltf", (gltf) => {
+  const mesh = gltf.scene;
 
-let frame = 0;
+  mesh.traverse((child) => {
+    if (child.isMesh) {
+      child.castShadow = true;
+      child.receiveShadow = true;
+    }
+  });
+
+  mesh.position.set(0, 0.5, -0.5);
+  scene.add(mesh);
+});
+
+const controls = new OrbitControls(camera, renderer.domElement);
+
+controls.update();
+
 function animate() {
   requestAnimationFrame(animate);
+  controls.update();
   renderer.render(scene, camera);
-  raycaster.setFromCamera(mouse, camera);
-  frame += 0.01;
-
-  const { array, originalPosition, randomValues } =
-    planeMesh.geometry.attributes.position;
-  for (let i = 0; i < array.length; i += 3) {
-    // x
-    array[i] = originalPosition[i] + Math.cos(frame + randomValues[i]) * 0.01;
-
-    // y
-    array[i + 1] =
-      originalPosition[i + 1] + Math.sin(frame + randomValues[i + 1]) * 0.001;
-  }
-
-  planeMesh.geometry.attributes.position.needsUpdate = true;
-
-  const intersects = raycaster.intersectObject(planeMesh);
-  if (intersects.length > 0) {
-    const { color } = intersects[0].object.geometry.attributes;
-
-    // vertice 1
-    color.setX(intersects[0].face.a, 0.1);
-    color.setY(intersects[0].face.a, 0.5);
-    color.setZ(intersects[0].face.a, 1);
-
-    // vertice 2
-    color.setX(intersects[0].face.b, 0.1);
-    color.setY(intersects[0].face.b, 0.5);
-    color.setZ(intersects[0].face.b, 1);
-
-    // vertice 3
-    color.setX(intersects[0].face.c, 0.1);
-    color.setY(intersects[0].face.c, 0.5);
-    color.setZ(intersects[0].face.c, 1);
-
-    intersects[0].object.geometry.attributes.color.needsUpdate = true;
-
-    const initialColor = {
-      r: 0,
-      g: 0.19,
-      b: 0.4,
-    };
-
-    const hoverColor = {
-      r: 0.1,
-      g: 0.5,
-      b: 1,
-    };
-
-    gsap.to(hoverColor, {
-      r: initialColor.r,
-      g: initialColor.g,
-      b: initialColor.b,
-      duration: 1,
-      onUpdate: () => {
-        // vertice 1
-        color.setX(intersects[0].face.a, hoverColor.r);
-        color.setY(intersects[0].face.a, hoverColor.g);
-        color.setZ(intersects[0].face.a, hoverColor.b);
-
-        // vertice 2
-        color.setX(intersects[0].face.b, hoverColor.r);
-        color.setY(intersects[0].face.b, hoverColor.g);
-        color.setZ(intersects[0].face.b, hoverColor.b);
-
-        // vertice 3
-        color.setX(intersects[0].face.c, hoverColor.r);
-        color.setY(intersects[0].face.c, hoverColor.g);
-        color.setZ(intersects[0].face.c, hoverColor.b);
-        color.needsUpdate = true;
-      },
-    });
-  }
 }
 
 animate();
-
-addEventListener("mousemove", (event) => {
-  mouse.x = (event.clientX / innerWidth) * 2 - 1;
-  mouse.y = -(event.clientY / innerHeight) * 2 + 1;
-});
